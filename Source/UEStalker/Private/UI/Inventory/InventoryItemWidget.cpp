@@ -4,6 +4,7 @@
 #include "Components/SizeBox.h"
 #include "Components/Border.h"
 #include "Components/Image.h"
+#include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
 #include "Items/ItemObject.h"
 
@@ -157,6 +158,45 @@ void UInventoryItemWidget::RefreshCountVisual()
 	BorderCountText->SetVisibility(bShow ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 }
 
+void UInventoryItemWidget::RefreshDurabilityVisual()
+{
+	if (!IsValid(DurabilityBar))
+	{
+		return;
+	}
+
+	if (!IsValid(ItemObject) || !ItemObject->DurabilityConfig.bHasDurability || ItemObject->DurabilityConfig.MaxDurability <= KINDA_SMALL_NUMBER)
+	{
+		DurabilityBar->SetVisibility(ESlateVisibility::Collapsed);
+		DurabilityBar->SetPercent(1.f);
+		return;
+	}
+
+	DurabilityBar->SetVisibility(ESlateVisibility::Visible);
+	DurabilityBar->SetPercent(CalcDurability(ItemObject));
+}
+
+float UInventoryItemWidget::CalcDurability(const UItemObject* Item)
+{
+	if (!IsValid(Item))
+	{
+		return 0.f;
+	}
+
+	if (!Item->DurabilityConfig.bHasDurability)
+	{
+		return 1.f;
+	}
+
+	const float MaxD = Item->DurabilityConfig.MaxDurability;
+	if (MaxD <= KINDA_SMALL_NUMBER)
+	{
+		return 0.f;
+	}
+
+	return FMath::Clamp(Item->Runtime.CurrDurability / MaxD, 0.f, 1.f);
+}
+
 FText UInventoryItemWidget::GetCountItems() const
 {
 	if (!IsValid(ItemObject))
@@ -191,6 +231,7 @@ void UInventoryItemWidget::Refresh()
 {
 	ApplySizeFromItem();
 	RefreshCountVisual();
+	RefreshDurabilityVisual();
 
 	if (IsValid(ItemImage))
 	{
@@ -202,5 +243,16 @@ void UInventoryItemWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
+	ApplySizeFromItem();
+	RefreshCountVisual();
+	RefreshDurabilityVisual();
+
 	Refresh();
+
+	// если ItemImage использует биндинг на GetIconImage — ок,
+	// если нет — выставим руками
+	if (IsValid(ItemImage))
+	{
+		ItemImage->SetBrush(GetIconImage());
+	}
 }

@@ -31,6 +31,10 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Inventory")
 	TArray<TObjectPtr<UItemObject>> Items;
 
+	/** 0 = без лимита */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Inventory|Weight", meta=(ClampMin="0.0", UIMin="0.0"))
+	float MaxCarryWeight = 50.f;
+
 	// ==== Events ====
 	UPROPERTY(BlueprintAssignable, Category="Inventory|Events")
 	FOnInventoryChanged OnInventoryChanged;
@@ -49,13 +53,34 @@ public:
 	TObjectPtr<UItemObject> ItemUsed = nullptr;
 
 	UFUNCTION(BlueprintCallable, Category="Inventory|Events")
-	void MarkInventoryChanged() { bIsInventoryChanged = true; }
+	void MarkInventoryChanged();
 
 	UFUNCTION(BlueprintCallable, Category="Inventory|Events")
-	void MarkItemUsed(UItemObject* Item) { ItemUsed = Item; bIsItemUsed = true; }
+	void MarkItemUsed(UItemObject* Item);
 
 	UFUNCTION(BlueprintPure, Category="Inventory")
 	FORCEINLINE int32 GetCapacity() const { return Columns * Rows; }
+
+	// =========================================
+	// Weight cache API
+	// =========================================
+
+	UFUNCTION(BlueprintCallable, Category="Inventory|Weight")
+	void InvalidateWeight();
+
+	UFUNCTION(BlueprintPure, Category="Inventory|Weight")
+	float GetTotalWeight() const;
+
+	UFUNCTION(BlueprintPure, Category="Inventory|Weight")
+	FORCEINLINE float GetMaxCarryWeight() const { return MaxCarryWeight; }
+
+	/** Проверка перегруза по предмету (учитывает StackCount * ItemWeight) */
+	UFUNCTION(BlueprintPure, Category="Inventory|Weight")
+	bool CanTakeItem(const UItemObject* ItemObject) const;
+
+	/** Проверка перегруза по добавочному весу */
+	UFUNCTION(BlueprintPure, Category="Inventory|Weight")
+	bool CanTakeAdditionalWeight(float AddWeight) const;
 
 	// =========================================
 	// Requested functions
@@ -102,6 +127,32 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Inventory")
 	void UseItem(UItemObject* ItemObject);
 
+	// =========================================
+	// Weapon/Magazine/Ammo operations (Drag&Drop)
+	// =========================================
+
+	/** Магазин -> Оружие. Удаляет магазин из инвентаря и кладёт его внутрь WeaponItem. */
+	UFUNCTION(BlueprintCallable, Category="Inventory|Weapon")
+	bool TryAttachMagazineToWeapon(UItemObject* WeaponItem, UItemObject* MagazineItem, bool bAllowSwap = true);
+
+	/** Снять магазин с оружия. Возвращает в инвентарь (если есть место) или отменяет операцию. */
+	UFUNCTION(BlueprintCallable, Category="Inventory|Weapon")
+	bool TryDetachMagazineFromWeapon(UItemObject* WeaponItem, bool bTryReturnToInventory = true);
+
+	/** Патроны -> Магазин. Загружает максимум (или RequestedCount). Учитывает stack у патронов. */
+	UFUNCTION(BlueprintCallable, Category="Inventory|Weapon")
+	bool TryLoadAmmoToMagazine(UItemObject* MagazineItem, UItemObject* AmmoItem, int32 RequestedCount, int32& OutLoadedCount);
+
+	/** Универсально для UMG: Payload кинул на Target. Возвращает true если применилось (mag->weapon, ammo->mag, ammo->weapon(через вставленный mag)). */
+	UFUNCTION(BlueprintCallable, Category="Inventory|Weapon")
+	bool TryApplyItemToItem(UItemObject* Payload, UItemObject* Target, int32 RequestedCount, int32& OutAppliedCount);
+
+	UFUNCTION(BlueprintPure, Category="Inventory|Weapon")
+	bool CanAttachMagazineToWeapon(const UItemObject* WeaponItem, const UItemObject* MagazineItem) const;
+
+	UFUNCTION(BlueprintPure, Category="Inventory|Weapon")
+	bool CanLoadAmmoToMagazine(const UItemObject* MagazineItem, const UItemObject* AmmoItem) const;
+
 	UFUNCTION(BlueprintPure, Category="Inventory|Grid", meta=(DisplayName="Tile Valid"))
 	bool TileValid(int32 TileX, int32 TileY) const;
 
@@ -125,4 +176,11 @@ private:
 	}
 
 	FORCEINLINE FIntPoint GetEffectiveItemSize(const UItemObject* ItemObject) const;
+
+	float GetStackWeight(const UItemObject* ItemObject) const;
+	bool AreStackCompatible(const UItemObject* A, const UItemObject* B) const;
+	
+	// Weight cache
+	mutable bool bWeightDirty = true;
+	mutable float CachedTotalWeight = 0.f;
 };

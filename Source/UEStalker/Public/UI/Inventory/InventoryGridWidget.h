@@ -50,7 +50,7 @@ public:
 	TObjectPtr<UInventoryWidget> WBInventory = nullptr;
 
 	// Класс виджета предмета, который кладём в CanvasPanel
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Grid")
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Grid")
 	TSubclassOf<UInventoryItemWidget> ItemWidgetClass;
 
 	// 1x1 = 64x64
@@ -85,6 +85,12 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Grid")
 	float LineThickness = 1.f;
 
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Grid|Design")
+	FLinearColor GridLineColor = FLinearColor(1.f, 1.f, 1.f, 0.12f);
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Grid|Design")
+	bool bGridLinesAntialias = true;
+
 	/** Достать ItemObject из DragDropOperation->Payload */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Grid|DragDrop")
 	UItemObject* GetPayload(UDragDropOperation* DragDropOperation) const;
@@ -118,7 +124,7 @@ public:
 
 	/** Initialize: сохранить ссылки, выставить TileSize, линии, Refresh, подписка на OnInventoryChanged */
 	UFUNCTION(BlueprintCallable, Category="Grid")
-	void Initialize(UInventoryComponent* InInventoryComponent, float InTileSize = 64.f, UInventoryWidget* InWBInventory = nullptr);
+	void InitializeGrid(UInventoryComponent* InInventoryComponent, float InTileSize = 64.f, UInventoryWidget* InWBInventory = nullptr);
 
 	/** Refresh: пересоздать ItemWidgets на CanvasPanel */
 	UFUNCTION(BlueprintCallable, Category="Grid")

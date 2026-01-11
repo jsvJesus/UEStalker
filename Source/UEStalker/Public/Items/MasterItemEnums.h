@@ -118,6 +118,53 @@ enum class EAmmoType : uint8
 	AmmoType_9x39_SP6            UMETA(DisplayName="9x39 СП-6"),
 };
 
+UENUM(BlueprintType)
+enum class EWeaponType : uint8
+{
+	Weapon_None      UMETA(DisplayName="None"),
+
+	// ItemCat_Weapons -> ItemSubCat_Weapons_ASR
+	Weapon_AK74      UMETA(DisplayName="AK74"),
+	Weapon_AK12      UMETA(DisplayName="AK12"),
+
+	// ItemCat_Weapons -> ItemSubCat_Weapons_SNP
+	Weapon_Vintorezz UMETA(DisplayName="Vintorezz"),
+};
+
+UENUM(BlueprintType)
+enum class EGrenadeType : uint8
+{
+	Grenade_None UMETA(DisplayName="None"),
+
+	// ItemCat_Weapons -> ItemSubCat_Weapons_Grenade
+	Grenade_Bolt UMETA(DisplayName="Bolt"),
+	Grenade_Frag UMETA(DisplayName="Frag"),
+	Grenade_Chemlight UMETA(DisplayName="Chemlight"),
+};
+
+UENUM(BlueprintType)
+enum class EMagazineType : uint8
+{
+	Mag_None      UMETA(DisplayName="None"),
+
+	// ItemCat_Attachments -> ItemSubCat_Attachments_Magazine
+	Mag_AK74      UMETA(DisplayName="Mag AK74"),
+	Mag_AK12      UMETA(DisplayName="Mag AK12"),
+	Mag_Vintorezz UMETA(DisplayName="Mag Vintorezz"),
+};
+
+/** Состояние оружия для AnimInstance */
+UENUM(BlueprintType)
+enum class EWeaponState : uint8
+{
+	Unarmed       UMETA(DisplayName="Unarmed"),
+	Grenade_Bolt  UMETA(DisplayName="Bolt"),
+	Grenade       UMETA(DisplayName="Grenade"),
+	Weapon_AK   UMETA(DisplayName="AK"),
+	Weapon_Pistol UMETA(DisplayName="Pistol"),
+	Weapon_Knife  UMETA(DisplayName="Knife"),
+};
+
 // (опционально) фильтр вкладок/сортировки UI
 UENUM(BlueprintType)
 enum class EItemFilter : uint8

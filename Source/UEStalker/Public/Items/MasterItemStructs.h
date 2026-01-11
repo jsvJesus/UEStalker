@@ -209,6 +209,53 @@ struct FItemOutfitStatsConfig
 	// Protections
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Protection")
 	FItemProtectionStats Protection;
+
+	// =======================
+	// Modules / Artefacts slots (актуально для Armor)
+	// =======================
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Modules", meta=(ClampMin="0", ClampMax="5", UIMin="0", UIMax="5"))
+	int32 MaxModuleSlots = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Modules", meta=(ClampMin="0", ClampMax="5", UIMin="0", UIMax="5"))
+	int32 UnlockedModuleSlots = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Modules", meta=(ClampMin="0", ClampMax="5", UIMin="0", UIMax="5"))
+	int32 UnlockedAfterUpgrade = 0;
+
+	// =======================
+	// Compatibility (Armor <-> Helmet/Backpack)
+	// =======================
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Compatibility")
+	bool bAllowExternalHelmet = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Compatibility")
+	bool bAllowExternalBackpack = true;
+
+	// Helmet allow/block
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Compatibility|Helmet")
+	TArray<int32> AllowedHelmetItemIDs;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Compatibility|Helmet")
+	TArray<int32> BlockedHelmetItemIDs;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Compatibility|Helmet")
+	TArray<FName> AllowedHelmetTags;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Compatibility|Helmet")
+	TArray<FName> BlockedHelmetTags;
+
+	// Backpack allow/block
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Compatibility|Backpack")
+	TArray<int32> AllowedBackpackItemIDs;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Compatibility|Backpack")
+	TArray<int32> BlockedBackpackItemIDs;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Compatibility|Backpack")
+	TArray<FName> AllowedBackpackTags;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Compatibility|Backpack")
+	TArray<FName> BlockedBackpackTags;
 };
 
 /** WeaponStatsConfig (минимум — дальше расширишь) */
@@ -222,6 +269,10 @@ struct FItemWeaponsStatsConfig
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon", meta=(ClampMin="0", UIMin="0"))
 	int32 MagazineSize = 0;
+
+	/** Какие типы магазинов принимает оружие (если используется магазины отдельно) */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon")
+	TArray<EMagazineType> CompatibleMagazines;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon", meta=(ClampMin="0.0", UIMin="0.0"))
 	float Damage = 0.f;
@@ -284,6 +335,22 @@ struct FMasterItemDetails
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Details")
 	TSubclassOf<AActor> ItemClass = nullptr;
 
+	/** Актор который спавнится в руках (1P). Если NULL — будет fallback (для оружия — DefaultWeaponActorClass с персонажа). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Details|Hands")
+	TSubclassOf<AActor> HandsClass = nullptr;
+
+	/** Сокет на Mesh1P куда прикреплять HandsClass. Если None — используется WeaponAttachSocketName с персонажа. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Details|Hands")
+	FName HandsSocket = NAME_None;
+
+	/** Принудительная стойка для AnimBP. Если Unarmed — определяется по WeaponType/GrenadeType/SubCategory. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Details|Hands")
+	EWeaponState HandsWeaponState = EWeaponState::Unarmed;
+
+	/** Тэги предмета (для совместимостей, фильтров и т.п.) */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Details")
+	TArray<FName> ItemTags;
+
 	// Names (указатели/ключи под БД)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Text")
 	FName ItemDisplayName = NAME_None;
@@ -341,4 +408,33 @@ struct FMasterItemDetails
 	// Condition UI (опционально)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Condition")
 	FItemColorsCondition ColorsCondition;
+
+	// ===== Weapons meta (по ItemCategory/SubCategory) =====
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Details|Weapons")
+	EWeaponType WeaponType = EWeaponType::Weapon_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Details|Weapons")
+	EGrenadeType GrenadeType = EGrenadeType::Grenade_None;
+
+	// ===== Attachments meta =====
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Details|Attachments")
+	EMagazineType MagazineType = EMagazineType::Mag_None;
+};
+
+/** MagazineConfig (для ItemSubCat_Attachments_Magazine) */
+USTRUCT(BlueprintType)
+struct FItemMagazineConfig
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Magazine")
+	EMagazineType MagazineType = EMagazineType::Mag_None;
+
+	/** С какими патронами совместим этот магазин (выбирается в DA списком) */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Magazine")
+	TArray<EAmmoType> CompatibleAmmoTypes;
+
+	/** Ёмкость магазина (если нужно). Можно 0 если не используется. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Magazine", meta=(ClampMin="0", UIMin="0"))
+	int32 Capacity = 0;
 };

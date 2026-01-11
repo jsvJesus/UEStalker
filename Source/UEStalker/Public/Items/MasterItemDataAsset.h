@@ -34,6 +34,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Item|Stats|Weapon")
 	FItemWeaponsStatsConfig WeaponStatsConfig;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Item|Stats|Magazine")
+	FItemMagazineConfig MagazineConfig;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Item|Stats|Consumable")
 	FConsumablesStats ConsumablesStats;
 

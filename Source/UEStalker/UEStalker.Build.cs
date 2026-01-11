@@ -25,7 +25,7 @@ public class UEStalker : ModuleRules
 			"PropertyEditor",
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] {  });
+		PrivateDependencyModuleNames.AddRange(new string[] { "AnimGraphRuntime" });
 
 		// Uncomment if you are using Slate UI
 		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });

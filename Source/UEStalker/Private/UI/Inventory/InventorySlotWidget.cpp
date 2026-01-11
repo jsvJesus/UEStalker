@@ -2,76 +2,85 @@
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Blueprint/DragDropOperation.h"
 #include "Components/SizeBox.h"
+#include "Components/ProgressBar.h"
 #include "Components/Border.h"
 #include "Components/Image.h"
-#include "Kismet/GameplayStatics.h"
+#include "Components/InventoryComponent.h"
 #include "Materials/MaterialInterface.h"
 #include "Items/ItemObject.h"
-#include "Components/InventoryComponent.h"
-#include "Sound/SoundBase.h"
+#include "UI/Inventory/Context/EquipmentDragDropOperation.h"
+#include "UI/Inventory/Context/DragItemVisualWidget.h"
 
 bool UInventorySlotWidget::ItemNone() const
 {
-	return !IsValid(ItemObject);
+	return !IsValid(GetItem());
 }
 
 UItemObject* UInventorySlotWidget::GetItem() const
 {
-	return IsValid(ItemObject) ? ItemObject : nullptr;
+	return IsValid(EquipmentRef) ? EquipmentRef->GetItemInSlot(SlotId) : nullptr;
 }
 
-void UInventorySlotWidget::UnequipItem(int32 Operation /*=0*/)
+void UInventorySlotWidget::SetEquipmentRef(UEquipmentComponent* InEquipment)
 {
-	if (!IsValid(ItemObject))
+	// --- UNBIND OLD ---
+	if (IsValid(EquipmentRef))
+	{
+		EquipmentRef->OnEquipmentSlotChanged.RemoveDynamic(this, &UInventorySlotWidget::HandleEquipmentChanged);
+		EquipmentRef->OnEquipmentActiveSlotChanged.RemoveDynamic(this, &UInventorySlotWidget::HandleActiveSlotChanged);
+		EquipmentRef->OnEquipmentSelectedSlotChanged.RemoveDynamic(this, &UInventorySlotWidget::HandleSelectedSlotChanged);
+	}
+	if (IsValid(InventoryRefCached))
+	{
+		InventoryRefCached->OnInventoryChanged.RemoveDynamic(this, &UInventorySlotWidget::HandleInventoryChanged);
+		InventoryRefCached = nullptr;
+	}
+
+	EquipmentRef = InEquipment;
+
+	// --- BIND NEW ---
+	if (IsValid(EquipmentRef))
+	{
+		EquipmentRef->OnEquipmentSlotChanged.AddDynamic(this, &UInventorySlotWidget::HandleEquipmentChanged);
+		EquipmentRef->OnEquipmentSelectedSlotChanged.AddDynamic(this, &UInventorySlotWidget::HandleSelectedSlotChanged);
+
+		InventoryRefCached = EquipmentRef->GetInventoryRef();
+		if (IsValid(InventoryRefCached))
+		{
+			InventoryRefCached->OnInventoryChanged.AddDynamic(this, &UInventorySlotWidget::HandleInventoryChanged);
+		}
+	}
+
+	RefreshSlot(nullptr, FLinearColor::White);
+}
+
+void UInventorySlotWidget::UnequipItem(bool bReturnToInventory)
+{
+	if (!IsValid(EquipmentRef))
 	{
 		return;
 	}
 
-	// Play equip sound
-	if (USoundBase* Snd = ItemObject->GetEquipmentSound())
+	if (EquipmentRef->UnequipSlot(SlotId, bReturnToInventory))
 	{
-		APawn* Pawn = GetOwningPlayerPawn();
-		const FVector Loc = IsValid(Pawn) ? Pawn->GetActorLocation() : FVector::ZeroVector;
-		UGameplayStatics::PlaySoundAtLocation(this, Snd, Loc);
+		OnEquipmentRemoved.Broadcast();
+		RefreshSlot(nullptr, FLinearColor::White);
 	}
-
-	// Сняли предмет
-	ItemObject = nullptr;
-
-	// Визуально очистили
-	ClearVisual();
-
-	// Событие
-	OnEquipmentRemoved.Broadcast();
 }
 
 bool UInventorySlotWidget::EquipItem(UItemObject* InItem)
 {
-	if (bLocked)
+	if (!IsValid(EquipmentRef))
 	{
 		return false;
 	}
 
-	if (!IsValid(InItem))
+	const bool bOk = EquipmentRef->EquipToSlot(SlotId, InItem, true);
+	if (bOk)
 	{
-		return false;
+		RefreshSlot(nullptr, FLinearColor::White);
 	}
-
-	// Уже занято
-	if (IsValid(ItemObject))
-	{
-		return false;
-	}
-
-	if (!CanAcceptItem(InItem))
-	{
-		return false;
-	}
-
-	ItemObject = InItem;
-
-	RefreshSlot(nullptr, FLinearColor::White);
-	return true;
+	return bOk;
 }
 
 UItemObject* UInventorySlotWidget::GetPayload(UDragDropOperation* Operation) const
@@ -80,21 +89,28 @@ UItemObject* UInventorySlotWidget::GetPayload(UDragDropOperation* Operation) con
 	{
 		return nullptr;
 	}
-
 	return Cast<UItemObject>(Operation->Payload);
+}
+
+bool UInventorySlotWidget::CanAcceptItem(UItemObject* InItem) const
+{
+	return IsValid(EquipmentRef) ? EquipmentRef->CanEquipItemToSlot(InItem, SlotId) : false;
 }
 
 void UInventorySlotWidget::RefreshSlot(UMaterialInterface* Material, FLinearColor InColorAndOpacity)
 {
-	// Нет предмета — очищаем
-	if (!IsValid(ItemObject))
+	RestoreAfterDrag();
+	UItemObject* Item = GetItem();
+
+	if (!IsValid(Item))
 	{
 		ClearVisual();
+		UpdateHighlightFromEquipment();
 		return;
 	}
 
-	ApplySizeFromItem();
-	
+	ApplyDesignSize();
+
 	if (IsValid(Icon))
 	{
 		if (IsValid(Material))
@@ -104,87 +120,71 @@ void UInventorySlotWidget::RefreshSlot(UMaterialInterface* Material, FLinearColo
 		}
 		else
 		{
-			// если материал не дали — рисуем иконку предмета
-			SetIconFromItem(InColorAndOpacity);
+			SetIconFromItem(Item, InColorAndOpacity);
 		}
 	}
-}
 
-FItemOutfitStatsConfig UInventorySlotWidget::GetOutfitStats() const
-{
-	return IsValid(ItemObject) ? ItemObject->GetOutfitStats() : FItemOutfitStatsConfig{};
-}
-
-void UInventorySlotWidget::SetInventoryRef(UInventoryComponent* InventoryComponent)
-{
-	InventoryRef = InventoryComponent;
-}
-
-FInventorySlotRule UInventorySlotWidget::GetSlotType() const
-{
-	return SlotRule;
-}
-
-bool UInventorySlotWidget::CanAcceptItem(UItemObject* InItem) const
-{
-	if (!IsValid(InItem))
-	{
-		return false;
-	}
-
-	// Универсальный слот
-	if (SlotRule.bAcceptAnyItem)
-	{
-		return true;
-	}
-
-	const FMasterItemDetails& D = InItem->ItemDetails;
-
-	// Category
-	if (SlotRule.AllowedCategory != EItemCategory::ItemCat_None &&
-		D.ItemCategory != SlotRule.AllowedCategory)
-	{
-		return false;
-	}
-
-	// SubCategory
-	if (SlotRule.AllowedSubCategory != EItemSubCategory::ItemSubCat_None &&
-		D.ItemSubCategory != SlotRule.AllowedSubCategory)
-	{
-		return false;
-	}
-
-	// AmmoType
-	if (SlotRule.AllowedAmmoType != EAmmoType::AmmoType_None &&
-		D.AmmoType != SlotRule.AllowedAmmoType)
-	{
-		return false;
-	}
-
-	return true;
+	RefreshDurabilityVisual(Item);
+	UpdateHighlightFromEquipment();
 }
 
 void UInventorySlotWidget::NativePreConstruct()
 {
 	Super::NativePreConstruct();
 
-	// EventPreConstruct: Width/Height -> SizeBox + сохранить Rotated
-	if (IsValid(BackGroundSizeBox))
-	{
-		BackGroundSizeBox->SetWidthOverride(Width);
-		BackGroundSizeBox->SetHeightOverride(Height);
-	}
-}
-
-void UInventorySlotWidget::SetSlotType(const FInventorySlotRule& InSlotRule)
-{
-	SlotRule = InSlotRule;
+	ApplyDesignSize();
 }
 
 void UInventorySlotWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+
+	if (IsValid(EquipmentRef))
+	{
+		EquipmentRef->OnEquipmentSlotChanged.RemoveDynamic(this, &UInventorySlotWidget::HandleEquipmentChanged);
+		EquipmentRef->OnEquipmentSlotChanged.AddDynamic(this, &UInventorySlotWidget::HandleEquipmentChanged);
+
+		EquipmentRef->OnEquipmentActiveSlotChanged.RemoveDynamic(this, &UInventorySlotWidget::HandleActiveSlotChanged);
+		EquipmentRef->OnEquipmentActiveSlotChanged.AddDynamic(this, &UInventorySlotWidget::HandleActiveSlotChanged);
+
+		EquipmentRef->OnEquipmentSelectedSlotChanged.RemoveDynamic(this, &UInventorySlotWidget::HandleSelectedSlotChanged);
+
+		UInventoryComponent* Inv = EquipmentRef->GetInventoryRef();
+		if (InventoryRefCached != Inv)
+		{
+			if (IsValid(InventoryRefCached))
+			{
+				InventoryRefCached->OnInventoryChanged.RemoveDynamic(this, &UInventorySlotWidget::HandleInventoryChanged);
+			}
+			InventoryRefCached = Inv;
+		}
+
+		if (IsValid(InventoryRefCached))
+		{
+			InventoryRefCached->OnInventoryChanged.RemoveDynamic(this, &UInventorySlotWidget::HandleInventoryChanged);
+			InventoryRefCached->OnInventoryChanged.AddDynamic(this, &UInventorySlotWidget::HandleInventoryChanged);
+		}
+	}
+
 	ClearVisual();
+	UpdateHighlightFromEquipment();
+}
+
+void UInventorySlotWidget::NativeDestruct()
+{
+	if (IsValid(EquipmentRef))
+	{
+		EquipmentRef->OnEquipmentSlotChanged.RemoveDynamic(this, &UInventorySlotWidget::HandleEquipmentChanged);
+		EquipmentRef->OnEquipmentActiveSlotChanged.RemoveDynamic(this, &UInventorySlotWidget::HandleActiveSlotChanged);
+	}
+
+	if (IsValid(InventoryRefCached))
+	{
+		InventoryRefCached->OnInventoryChanged.RemoveDynamic(this, &UInventorySlotWidget::HandleInventoryChanged);
+		InventoryRefCached = nullptr;
+	}
+
+	Super::NativeDestruct();
 }
 
 FReply UInventorySlotWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
@@ -192,78 +192,173 @@ FReply UInventorySlotWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry
 	return UWidgetBlueprintLibrary::DetectDragIfPressed(InMouseEvent, this, EKeys::LeftMouseButton).NativeReply;
 }
 
-void UInventorySlotWidget::NativeOnDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent,
-	UDragDropOperation*& OutOperation)
+FReply UInventorySlotWidget::NativeOnMouseButtonDoubleClick(const FGeometry& InGeometry,
+	const FPointerEvent& InMouseEvent)
+{
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	{
+		UnequipItem(true); // вернёт в инвентарь (если есть место)
+		return FReply::Handled();
+	}
+	return Super::NativeOnMouseButtonDoubleClick(InGeometry, InMouseEvent);
+}
+
+void UInventorySlotWidget::NativeOnDragDetected(
+	const FGeometry& InGeometry,
+	const FPointerEvent& InMouseEvent,
+	UDragDropOperation*& OutOperation
+)
 {
 	OutOperation = nullptr;
 
-	if (bLocked || !IsValid(ItemObject))
+	if (!IsValid(EquipmentRef))
 	{
 		return;
 	}
 
-	UDragDropOperation* Op = UWidgetBlueprintLibrary::CreateDragDropOperation(UDragDropOperation::StaticClass());
+	UItemObject* Item = GetItem();
+	if (!IsValid(Item))
+	{
+		return;
+	}
+
+	if (EquipmentRef->IsSlotLocked(SlotId))
+	{
+		return;
+	}
+
+	// ВАЖНО: пока тянем предмет из слота, этот слот НЕ должен перекрывать hit-test
+	CachedVisibility = GetVisibility();
+	bDragInProgress = true;
+	SetVisibility(ESlateVisibility::HitTestInvisible);
+
+	UEquipmentDragDropOperation* Op = Cast<UEquipmentDragDropOperation>(
+		UWidgetBlueprintLibrary::CreateDragDropOperation(UEquipmentDragDropOperation::StaticClass())
+	);
 	if (!IsValid(Op))
 	{
 		return;
 	}
 
-	// Payload = ItemObject, DefaultDragVisual = self
-	Op->Payload = ItemObject;
-	Op->DefaultDragVisual = this;
+	Op->Payload = Item;
+
+	// Drag Visual: отдельный виджет, который не блокирует drop targets
+	UDragItemVisualWidget* DragVisual = nullptr;
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		DragVisual = CreateWidget<UDragItemVisualWidget>(PC, UDragItemVisualWidget::StaticClass());
+		if (IsValid(DragVisual))
+		{
+			DragVisual->SetupFromItem(Item, TileSize);
+		}
+	}
+
+	Op->DefaultDragVisual = IsValid(DragVisual) ? Cast<UWidget>(DragVisual) : Cast<UWidget>(this);
 	Op->Pivot = EDragPivot::CenterCenter;
 	Op->Offset = FVector2D(0.f, 0.f);
 
-	// Bind Event to OnDrop -> UnequipItem
-	Op->OnDrop.AddDynamic(this, &UInventorySlotWidget::HandleOperationDrop);
+	Op->SourceEquipment = EquipmentRef;
+	Op->SourceSlotId = SlotId;
 
 	OutOperation = Op;
 }
 
-bool UInventorySlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent,
-	UDragDropOperation* InOperation)
+bool UInventorySlotWidget::NativeOnDrop(
+	const FGeometry& InGeometry,
+	const FDragDropEvent& InDragDropEvent,
+	UDragDropOperation* InOperation
+)
 {
-	if (bLocked)
-	{
-		return false;
-	}
-
 	UItemObject* PayloadItem = GetPayload(InOperation);
 	if (!IsValid(PayloadItem))
 	{
+		if (IsValid(EquipmentRef))
+		{
+			EquipmentRef->ClearActiveSlot();
+		}
 		return false;
 	}
 
-	// уже занято
-	if (IsValid(ItemObject))
+	// если положили к нам — EquipmentComponent сам:
+	// - снимет предмет из другого слота (если он оттуда)
+	// - уберёт из Inventory (если он оттуда)
+	const bool bOk = EquipItem(PayloadItem);
+
+	if (IsValid(EquipmentRef))
 	{
-		return false;
+		EquipmentRef->ClearActiveSlot();
 	}
-
-	if (!CanAcceptItem(PayloadItem))
-	{
-		return false;
-	}
-
-	return EquipItem(PayloadItem);
+	UpdateHighlightFromEquipment();
+	
+	return bOk;
 }
 
-void UInventorySlotWidget::HandleOperationDrop(UDragDropOperation* Operation)
+void UInventorySlotWidget::NativeOnDragEnter(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
 {
-	// Любые drop операции, начатой из этого слота -> снять предмет со слота
-	UnequipItem(0);
-}
+	Super::NativeOnDragEnter(InGeometry, InDragDropEvent, InOperation);
 
-void UInventorySlotWidget::ApplySizeFromItem()
-{
-	if (!IsValid(BackGroundSizeBox) || !IsValid(ItemObject))
+	if (!IsValid(EquipmentRef))
 	{
 		return;
 	}
 
-	// Берём размер из MasterItemStructs: ItemDetails.Size (и учитываем rotation через GetDimensions)
+	UItemObject* PayloadItem = GetPayload(InOperation);
+	EquipmentRef->ActivateSlot(SlotId, PayloadItem);
+	UpdateHighlightFromEquipment();
+}
+
+void UInventorySlotWidget::NativeOnDragLeave(const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
+{
+	Super::NativeOnDragLeave(InDragDropEvent, InOperation);
+
+	if (!IsValid(EquipmentRef))
+	{
+		return;
+	}
+
+	EquipmentRef->ClearActiveSlot();
+	UpdateHighlightFromEquipment();
+}
+
+void UInventorySlotWidget::NativeOnDragCancelled(const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
+{
+	Super::NativeOnDragCancelled(InDragDropEvent, InOperation);
+
+	RestoreAfterDrag();
+
+	if (IsValid(EquipmentRef))
+	{
+		EquipmentRef->ClearActiveSlot();
+	}
+	UpdateHighlightFromEquipment();
+}
+
+void UInventorySlotWidget::HandleEquipmentChanged(EEquipmentSlotId ChangedSlot, UItemObject* NewItem)
+{
+	if (ChangedSlot != SlotId)
+	{
+		return;
+	}
+
+	RestoreAfterDrag();
+	RefreshSlot(nullptr, FLinearColor::White);
+}
+
+void UInventorySlotWidget::HandleActiveSlotChanged()
+{
+	// ActiveSlot/PrevSlot может поменяться без Local drag events (например, когда дроп завершился)
+	UpdateHighlightFromEquipment();
+}
+
+void UInventorySlotWidget::ApplySizeFromItem(UItemObject* Item)
+{
+	if (!IsValid(BackGroundSizeBox) || !IsValid(Item))
+	{
+		return;
+	}
+
 	FItemSize Dimensions;
-	ItemObject->GetDimensions(Dimensions);
+	Item->GetDimensions(Dimensions);
 
 	const float W = FMath::Max(1, Dimensions.X) * TileSize;
 	const float H = FMath::Max(1, Dimensions.Y) * TileSize;
@@ -272,21 +367,20 @@ void UInventorySlotWidget::ApplySizeFromItem()
 	BackGroundSizeBox->SetHeightOverride(H);
 }
 
-void UInventorySlotWidget::SetIconFromItem(FLinearColor InColorAndOpacity)
+void UInventorySlotWidget::SetIconFromItem(UItemObject* Item, FLinearColor InColorAndOpacity)
 {
-	if (!IsValid(Icon) || !IsValid(ItemObject))
+	if (!IsValid(Icon) || !IsValid(Item))
 	{
 		return;
 	}
 
-	if (UTexture2D* Tex = ItemObject->ItemDetails.ItemIcon)
+	if (UTexture2D* Tex = Item->ItemDetails.ItemIcon)
 	{
 		Icon->SetBrushFromTexture(Tex, true);
 		Icon->SetColorAndOpacity(InColorAndOpacity);
 	}
 	else
 	{
-		// нет иконки — делаем прозрачным
 		FSlateBrush Empty;
 		Icon->SetBrush(Empty);
 		Icon->SetColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.f));
@@ -295,12 +389,7 @@ void UInventorySlotWidget::SetIconFromItem(FLinearColor InColorAndOpacity)
 
 void UInventorySlotWidget::ClearVisual()
 {
-	// Пустой слот по умолчанию 1x1
-	if (IsValid(BackGroundSizeBox))
-	{
-		BackGroundSizeBox->SetWidthOverride(TileSize);
-		BackGroundSizeBox->SetHeightOverride(TileSize);
-	}
+	ApplyDesignSize();
 
 	if (IsValid(Icon))
 	{
@@ -308,4 +397,117 @@ void UInventorySlotWidget::ClearVisual()
 		Icon->SetBrush(Empty);
 		Icon->SetColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.f));
 	}
+
+	if (IsValid(DurabilityBar))
+	{
+		DurabilityBar->SetVisibility(ESlateVisibility::Collapsed);
+		DurabilityBar->SetPercent(1.f);
+	}
+}
+
+void UInventorySlotWidget::UpdateHighlightFromEquipment()
+{
+	if (!IsValid(BackgroundSlot) || !IsValid(EquipmentRef))
+	{
+		return;
+	}
+
+	// Normal
+	FLinearColor C = FLinearColor::White;
+
+	// Blocked = тёмно-серый
+	if (EquipmentRef->IsSlotBlocked(SlotId))
+	{
+		C = FLinearColor(0.15f, 0.15f, 0.15f, 1.f);
+	}
+	// Active (can drop) = серый
+	else if (EquipmentRef->ActiveSlot == SlotId)
+	{
+		C = FLinearColor(0.5f, 0.5f, 0.5f, 1.f);
+	}
+	// Prev (cannot drop) = красный
+	else if (EquipmentRef->PrevSlot == SlotId)
+	{
+		C = FLinearColor(1.f, 0.f, 0.f, 1.f);
+	}
+	else if (EquipmentRef->SelectedSlot == SlotId)
+	{
+		C = FLinearColor(0.0f, 0.65f, 1.0f, 1.f);
+	}
+
+	BackgroundSlot->SetBrushColor(C);
+}
+
+void UInventorySlotWidget::ApplyDesignSize()
+{
+	if (!IsValid(BackGroundSizeBox))
+	{
+		return;
+	}
+
+	const float W = (Width  > 0.f) ? Width  : TileSize;
+	const float H = (Height > 0.f) ? Height : TileSize;
+
+	BackGroundSizeBox->SetWidthOverride(W);
+	BackGroundSizeBox->SetHeightOverride(H);
+}
+
+void UInventorySlotWidget::RefreshDurabilityVisual(UItemObject* Item)
+{
+	if (!IsValid(DurabilityBar))
+	{
+		return;
+	}
+
+	if (!IsValid(Item) || !Item->DurabilityConfig.bHasDurability || Item->DurabilityConfig.MaxDurability <= KINDA_SMALL_NUMBER)
+	{
+		DurabilityBar->SetVisibility(ESlateVisibility::Collapsed);
+		DurabilityBar->SetPercent(1.f);
+		return;
+	}
+
+	DurabilityBar->SetVisibility(ESlateVisibility::Visible);
+	DurabilityBar->SetPercent(CalcDurability(Item));
+}
+
+float UInventorySlotWidget::CalcDurability(const UItemObject* Item)
+{
+	if (!IsValid(Item))
+	{
+		return 0.f;
+	}
+
+	if (!Item->DurabilityConfig.bHasDurability)
+	{
+		return 1.f;
+	}
+
+	const float MaxD = Item->DurabilityConfig.MaxDurability;
+	if (MaxD <= KINDA_SMALL_NUMBER)
+	{
+		return 0.f;
+	}
+
+	return FMath::Clamp(Item->Runtime.CurrDurability / MaxD, 0.f, 1.f);
+}
+
+void UInventorySlotWidget::HandleInventoryChanged()
+{
+	RefreshDurabilityVisual(GetItem());
+}
+
+void UInventorySlotWidget::RestoreAfterDrag()
+{
+	if (!bDragInProgress)
+	{
+		return;
+	}
+
+	bDragInProgress = false;
+	SetVisibility(CachedVisibility);
+}
+
+void UInventorySlotWidget::HandleSelectedSlotChanged(EEquipmentSlotId NewSelectedSlot)
+{
+	UpdateHighlightFromEquipment();
 }

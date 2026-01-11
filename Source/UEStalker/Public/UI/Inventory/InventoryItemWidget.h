@@ -8,6 +8,7 @@
 class USizeBox;
 class UBorder;
 class UImage;
+class UProgressBar;
 class UTextBlock;
 class UItemObject;
 
@@ -35,6 +36,9 @@ public:
 
 	UPROPERTY(meta=(BindWidget), BlueprintReadOnly)
 	TObjectPtr<UTextBlock> CountText = nullptr;
+
+	UPROPERTY(meta=(BindWidgetOptional), BlueprintReadOnly)
+	TObjectPtr<UProgressBar> DurabilityBar = nullptr;
 
 	// ===== Runtime =====
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="Item", meta=(ExposeOnSpawn="true"))
@@ -90,4 +94,7 @@ protected:
 private:
 	void ApplySizeFromItem();
 	void RefreshCountVisual();
+
+	void RefreshDurabilityVisual();
+	static float CalcDurability(const UItemObject* Item);
 };

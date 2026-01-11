@@ -1,6 +1,7 @@
 #include "UI/Inventory/InventoryGridWidget.h"
 #include "UI/Inventory/InventoryItemWidget.h"
 #include "UI/Inventory/InventoryWidget.h"
+#include "UI/Inventory/Context/EquipmentDragDropOperation.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
 #include "Blueprint/SlateBlueprintLibrary.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
@@ -10,6 +11,7 @@
 #include "Components/CanvasPanelSlot.h"
 #include "Components/SizeBox.h"
 #include "Components/InventoryComponent.h"
+#include "Components/EquipmentComponent.h"
 #include "Items/ItemObject.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/CoreStyle.h"
@@ -90,7 +92,26 @@ void UInventoryGridWidget::OnItemUsed(UItemObject* ItemObject)
 		return;
 	}
 
-	InventoryComponent->UseItem(ItemObject);
+	// DoubleClick: first try auto-equip (Armor/Helmet/Backpack/Weapons/etc)
+	if (IsValid(WBInventory) && WBInventory->TryAutoEquipItem(ItemObject))
+	{
+		return;
+	}
+
+	// Only use consumables on double click, avoid deleting weapons/armor by accident
+	const EItemCategory Cat = ItemObject->ItemDetails.ItemCategory;
+	const EItemSubCategory Sub = ItemObject->ItemDetails.ItemSubCategory;
+
+	const bool bIsConsumable =
+		(Cat == EItemCategory::ItemCat_UsableItems) ||
+		(Sub == EItemSubCategory::ItemSubCat_Items_Food) ||
+		(Sub == EItemSubCategory::ItemSubCat_Items_Water) ||
+		(Sub == EItemSubCategory::ItemSubCat_Items_Medicine);
+
+	if (bIsConsumable)
+	{
+		InventoryComponent->UseItem(ItemObject);
+	}
 }
 
 void UInventoryGridWidget::OnItemRemoved(UItemObject* ItemObject)
@@ -145,7 +166,7 @@ void UInventoryGridWidget::CreateLineSegments()
 	}
 }
 
-void UInventoryGridWidget::Initialize(UInventoryComponent* InInventoryComponent, float InTileSize,
+void UInventoryGridWidget::InitializeGrid(UInventoryComponent* InInventoryComponent, float InTileSize,
 	UInventoryWidget* InWBInventory)
 {
 	InventoryComponent = InInventoryComponent;
@@ -165,43 +186,52 @@ void UInventoryGridWidget::Initialize(UInventoryComponent* InInventoryComponent,
 
 void UInventoryGridWidget::Refresh()
 {
-	UE_LOG(LogTemp, Warning, TEXT("[InventoryGrid] RuntimeClass=%s  ItemWidgetClass=%s"),
-	*GetClass()->GetPathName(),
-	*GetNameSafe(ItemWidgetClass));
-	
 	if (!IsValid(GridCanvasPanel) || !IsValid(InventoryComponent))
 	{
-		UE_LOG(LogTemp, Error, TEXT("[InventoryGrid] GridCanvasPanel or InventoryComponent is null. Check BindWidget names + Initialize()."));
-		return;
-	}
-
-	if (!ItemWidgetClass)
-	{
-		UE_LOG(LogTemp, Error, TEXT("[InventoryGrid] ItemWidgetClass is NULL! Set it in WBP_InventoryGrid to WBP_InventoryItem (parent UInventoryItem)."));
 		return;
 	}
 
 	GridCanvasPanel->ClearChildren();
 
+	// Карта уникальных предметов -> их TopLeft tile
 	TMap<UItemObject*, FTile> ItemToTile;
 	GetItemTileMap(ItemToTile);
 
 	APlayerController* PC = GetOwningPlayer();
+
 	for (const TPair<UItemObject*, FTile>& Pair : ItemToTile)
 	{
 		UItemObject* Item = Pair.Key;
 		const FTile& Tile = Pair.Value;
-		if (!IsValid(Item)) continue;
+		if (!IsValid(Item))
+		{
+			continue;
+		}
 
-		UInventoryItemWidget* ItemWidget = CreateWidget<UInventoryItemWidget>(PC, ItemWidgetClass);
-		if (!IsValid(ItemWidget)) continue;
+		// Создаем виджет предмета
+		UClass* UseClass = ItemWidgetClass ? ItemWidgetClass.Get() : UInventoryItemWidget::StaticClass();
+		UInventoryItemWidget* ItemWidget = CreateWidget<UInventoryItemWidget>(PC, UseClass);
+		if (!IsValid(ItemWidget))
+		{
+			continue;
+		}
 
 		ItemWidget->ItemObject = Item;
 		ItemWidget->TileSize = TileSize;
 		ItemWidget->Refresh();
 
+		// Подписываемся на события Use/Delete из item widget
+		ItemWidget->OnUseSelectedItem.RemoveAll(this);
+		ItemWidget->OnDeleteSelectedItem.RemoveAll(this);
+		ItemWidget->OnUseSelectedItem.AddDynamic(this, &UInventoryGridWidget::OnItemUsed);
+		ItemWidget->OnDeleteSelectedItem.AddDynamic(this, &UInventoryGridWidget::OnItemRemoved);
+
+		// Добавляем в CanvasPanel
 		UCanvasPanelSlot* GridSlot = Cast<UCanvasPanelSlot>(GridCanvasPanel->AddChild(ItemWidget));
-		if (!GridSlot) continue;
+		if (!GridSlot)
+		{
+			continue;
+		}
 
 		GridSlot->SetAutoSize(true);
 		GridSlot->SetPosition(FVector2D(Tile.X * TileSize, Tile.Y * TileSize));
@@ -311,6 +341,15 @@ bool UInventoryGridWidget::NativeOnDragOver(const FGeometry& InGeometry, const F
 		return false;
 	}
 
+	// Если дроп пришёл от equipment-drag (или когда подсветка могла залипнуть) — сбросим её
+	if (UEquipmentDragDropOperation* EquipOp = Cast<UEquipmentDragDropOperation>(InOperation))
+	{
+		if (IsValid(EquipOp->SourceEquipment))
+		{
+			EquipOp->SourceEquipment->ClearActiveSlot();
+		}
+	}
+
 	// Локальные координаты курсора внутри грида
 	MousePosition = InGeometry.AbsoluteToLocal(InDragDropEvent.GetScreenSpacePosition());
 
@@ -376,6 +415,16 @@ bool UInventoryGridWidget::NativeOnDrop(const FGeometry& InGeometry, const FDrag
 		if (TopLeftIndex != INDEX_NONE)
 		{
 			InventoryComponent->AddItemAt(Item, TopLeftIndex);
+
+			// if dragged from EquipmentSlot -> clear it immediately
+			if (UEquipmentDragDropOperation* EquipOp = Cast<UEquipmentDragDropOperation>(InOperation))
+			{
+				if (IsValid(EquipOp->SourceEquipment))
+				{
+					EquipOp->SourceEquipment->UnequipSlot(EquipOp->SourceSlotId, false);
+				}
+			}
+			
 			return true;
 		}
 	}
@@ -388,40 +437,65 @@ bool UInventoryGridWidget::NativeOnDrop(const FGeometry& InGeometry, const FDrag
 		InventoryComponent->DropItem(OwnerActor, Item, true);
 	}
 
+	// если перетащили из EquipmentSlot -> надо снять из слота
+	if (UEquipmentDragDropOperation* EquipOp = Cast<UEquipmentDragDropOperation>(InOperation))
+	{
+		if (IsValid(EquipOp->SourceEquipment))
+		{
+			EquipOp->SourceEquipment->UnequipSlot(EquipOp->SourceSlotId, false);
+		}
+	}
+
 	return true;
 }
 
-int32 UInventoryGridWidget::NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
-                                        const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId,
-                                        const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
+int32 UInventoryGridWidget::NativePaint(
+	const FPaintArgs& Args,
+	const FGeometry& AllottedGeometry,
+	const FSlateRect& MyCullingRect,
+	FSlateWindowElementList& OutDrawElements,
+	int32 LayerId,
+	const FWidgetStyle& InWidgetStyle,
+	bool bParentEnabled
+) const
 {
-	LayerId = Super::NativePaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
-
-	if (Lines.Num() <= 0)
+	// СЕТКА СНАЧАЛА (под предметами)
+	if (Lines.Num() > 0)
 	{
-		return LayerId;
+		// умножим на общий тинт виджета (если вдруг кто-то его меняет)
+		const FLinearColor FinalLineColor = GridLineColor * InWidgetStyle.GetColorAndOpacityTint();
+
+		for (const FLine2D& L : Lines)
+		{
+			TArray<FVector2D> Points;
+			Points.Add(L.Start);
+			Points.Add(L.End);
+
+			FSlateDrawElement::MakeLines(
+				OutDrawElements,
+				LayerId,
+				AllottedGeometry.ToPaintGeometry(),
+				Points,
+				ESlateDrawEffect::None,
+				FinalLineColor,
+				bGridLinesAntialias,
+				LineThickness
+			);
+		}
 	}
 
-	// Рисуем линии как набор сегментов
-	for (const FLine2D& L : Lines)
-	{
-		TArray<FVector2D> Points;
-		Points.Add(L.Start);
-		Points.Add(L.End);
+	// ДЕТИ (иконки/предметы) ПОВЕРХ СЕТКИ
+	int32 RetLayer = Super::NativePaint(
+		Args,
+		AllottedGeometry,
+		MyCullingRect,
+		OutDrawElements,
+		LayerId + 1,
+		InWidgetStyle,
+		bParentEnabled
+	);
 
-		FSlateDrawElement::MakeLines(
-			OutDrawElements,
-			LayerId,
-			AllottedGeometry.ToPaintGeometry(),
-			Points,
-			ESlateDrawEffect::None,
-			InWidgetStyle.GetColorAndOpacityTint(),
-			true,
-			LineThickness
-		);
-	}
-
-	// Подсветка места дропа
+	// Подсветка места дропа (поверх всего)
 	if (bDrawDropLocation)
 	{
 		UDragDropOperation* CurrentOp = UWidgetBlueprintLibrary::GetDragDroppingContent();
@@ -452,14 +526,16 @@ int32 UInventoryGridWidget::NativePaint(const FPaintArgs& Args, const FGeometry&
 
 			FSlateDrawElement::MakeBox(
 				OutDrawElements,
-				LayerId + 1,
+				RetLayer + 1,
 				AllottedGeometry.ToPaintGeometry(BoxPos, FVector2D(BoxW, BoxH)),
 				WhiteBrush,
 				ESlateDrawEffect::None,
 				Tint
 			);
+
+			return RetLayer + 1;
 		}
 	}
 
-	return LayerId + 1;
+	return RetLayer;
 }

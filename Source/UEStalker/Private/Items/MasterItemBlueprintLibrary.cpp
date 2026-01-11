@@ -1,4 +1,7 @@
 #include "Items/MasterItemBlueprintLibrary.h"
+#include "Engine/Texture2D.h"
+#include "Items/ItemObject.h"
+#include "Components/InventoryComponent.h"
 
 FText UMasterItemBlueprintLibrary::GetCategoryText(EItemCategory Value)
 {
@@ -21,6 +24,42 @@ FText UMasterItemBlueprintLibrary::GetSubCategoryText(EItemSubCategory Value)
 FText UMasterItemBlueprintLibrary::GetAmmoTypeText(EAmmoType Value)
 {
 	if (const UEnum* Enum = StaticEnum<EAmmoType>())
+	{
+		return Enum->GetDisplayNameTextByValue((int64)Value);
+	}
+	return FText::GetEmpty();
+}
+
+FText UMasterItemBlueprintLibrary::GetWeaponTypeText(EWeaponType Value)
+{
+	if (const UEnum* Enum = StaticEnum<EWeaponType>())
+	{
+		return Enum->GetDisplayNameTextByValue((int64)Value);
+	}
+	return FText::GetEmpty();
+}
+
+FText UMasterItemBlueprintLibrary::GetGrenadeTypeText(EGrenadeType Value)
+{
+	if (const UEnum* Enum = StaticEnum<EGrenadeType>())
+	{
+		return Enum->GetDisplayNameTextByValue((int64)Value);
+	}
+	return FText::GetEmpty();
+}
+
+FText UMasterItemBlueprintLibrary::GetMagazineTypeText(EMagazineType Value)
+{
+	if (const UEnum* Enum = StaticEnum<EMagazineType>())
+	{
+		return Enum->GetDisplayNameTextByValue((int64)Value);
+	}
+	return FText::GetEmpty();
+}
+
+FText UMasterItemBlueprintLibrary::GetWeaponStateText(EWeaponState Value)
+{
+	if (const UEnum* Enum = StaticEnum<EWeaponState>())
 	{
 		return Enum->GetDisplayNameTextByValue((int64)Value);
 	}
@@ -76,4 +115,77 @@ UTexture2D* UMasterItemBlueprintLibrary::GetConditionTextureByPercent(const FIte
 
 	// 80..100
 	return Cond.PoorCondition;
+}
+
+bool UMasterItemBlueprintLibrary::CanApplyPayloadToTarget(const UItemObject* Payload, const UItemObject* Target)
+{
+	if (!IsValid(Payload) || !IsValid(Target) || Payload == Target)
+	{
+		return false;
+	}
+
+	// Mag -> Weapon
+	if (Payload->IsMagazine() && Target->IsWeapon())
+	{
+		if (IsValid(Payload->OwnerWeapon))
+		{
+			return false;
+		}
+
+		const EMagazineType MagType = Payload->ItemDetails.MagazineType;
+		const auto& List = Target->WeaponStatsConfig.CompatibleMagazines;
+		if (List.Num() > 0)
+		{
+			return List.Contains(MagType);
+		}
+
+		// fallback: по типу патронов
+		const EAmmoType WAmmo = Target->WeaponStatsConfig.AmmoType;
+		return WAmmo != EAmmoType::AmmoType_None && Payload->MagazineConfig.CompatibleAmmoTypes.Contains(WAmmo);
+	}
+
+	// Ammo -> Magazine
+	if (Payload->IsAmmo() && Target->IsMagazine())
+	{
+		const int32 Cap  = Target->GetMagazineCapacity();
+		const int32 Curr = FMath::Max(0, Target->MagazineAmmoCount);
+		if (Cap <= 0 || Curr >= Cap)
+		{
+			return false;
+		}
+
+		const EAmmoType AmmoType = Payload->ItemDetails.AmmoType;
+		if (AmmoType == EAmmoType::AmmoType_None)
+		{
+			return false;
+		}
+
+		if (Target->MagazineAmmoCount > 0 && Target->MagazineLoadedAmmoType != AmmoType)
+		{
+			return false;
+		}
+
+		const auto& Compat = Target->MagazineConfig.CompatibleAmmoTypes;
+		return Compat.Num() == 0 || Compat.Contains(AmmoType);
+	}
+
+	// Ammo -> Weapon (через вставленный магазин)
+	if (Payload->IsAmmo() && Target->IsWeapon() && IsValid(Target->InsertedMagazine))
+	{
+		return CanApplyPayloadToTarget(Payload, Target->InsertedMagazine);
+	}
+
+	return false;
+}
+
+bool UMasterItemBlueprintLibrary::ApplyPayloadToTarget(UInventoryComponent* Inventory, UItemObject* Payload,
+	UItemObject* Target, int32 RequestedCount, int32& OutAppliedCount)
+{
+	OutAppliedCount = 0;
+	if (!IsValid(Inventory) || !IsValid(Payload) || !IsValid(Target))
+	{
+		return false;
+	}
+
+	return Inventory->TryApplyItemToItem(Payload, Target, RequestedCount, OutAppliedCount);
 }

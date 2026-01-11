@@ -40,10 +40,37 @@ public:
 	FItemWeaponsStatsConfig WeaponStatsConfig;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Item")
+	FItemMagazineConfig MagazineConfig;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Item")
 	FConsumablesStats ConsumablesStats;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Runtime")
 	FItemRuntimeState Runtime;
+
+	// =========================================
+	// Weapon/Magazine runtime (attachments/ammo)
+	// =========================================
+
+	/** Если этот предмет — оружие, сюда кладём вставленный магазин (UItemObject магазина). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Weapon|Runtime")
+	TObjectPtr<UItemObject> InsertedMagazine = nullptr;
+
+	/** Если этот предмет — магазин, ссылка на оружие в котором он сейчас стоит (чтобы нельзя было вставить в два места). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Magazine|Runtime")
+	TObjectPtr<UItemObject> OwnerWeapon = nullptr;
+
+	/** Текущее кол-во патронов в магазине (может быть 0). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Magazine|Runtime", meta=(ClampMin="0", UIMin="0"))
+	int32 MagazineAmmoCount = 0;
+
+	/** Тип патрона который сейчас загружен в магазин (None если магазин пуст). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Magazine|Runtime")
+	EAmmoType MagazineLoadedAmmoType = EAmmoType::AmmoType_None;
+
+	/** Референс на DataAsset патронов которые загружены (нужно для веса/иконки; NULL если магазин пуст). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Magazine|Runtime")
+	TObjectPtr<UMasterItemDataAsset> MagazineLoadedAmmoAsset = nullptr;
 
 public:
 	UFUNCTION(BlueprintCallable, Category="Item")
@@ -75,4 +102,42 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Item", meta=(DisplayName="Get Outfit Stats"))
 	FItemOutfitStatsConfig GetOutfitStats() const;
+
+	// =========================================
+	// Type helpers
+	// =========================================
+
+	UFUNCTION(BlueprintPure, Category="Item|Type")
+	bool IsWeapon() const;
+
+	UFUNCTION(BlueprintPure, Category="Item|Type")
+	bool IsMagazine() const;
+
+	UFUNCTION(BlueprintPure, Category="Item|Type")
+	bool IsAmmo() const;
+
+	// =========================================
+	// Magazine helpers
+	// =========================================
+
+	UFUNCTION(BlueprintPure, Category="Item|Magazine")
+	int32 GetMagazineCapacity() const;
+
+	UFUNCTION(BlueprintPure, Category="Item|Magazine")
+	int32 GetMagazineAmmo() const { return FMath::Max(0, MagazineAmmoCount); }
+
+	UFUNCTION(BlueprintPure, Category="Item|Magazine")
+	EAmmoType GetMagazineLoadedAmmoType() const { return MagazineLoadedAmmoType; }
+
+	/** Текст "0/30" для UMG. */
+	UFUNCTION(BlueprintPure, Category="Item|Magazine")
+	FText GetMagazineAmmoText() const;
+
+	// =========================================
+	// Ammo helpers
+	// =========================================
+
+	/** Текст "120" (stack). */
+	UFUNCTION(BlueprintPure, Category="Item|Ammo")
+	FText GetAmmoCountText() const;
 };

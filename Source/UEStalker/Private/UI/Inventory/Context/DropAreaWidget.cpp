@@ -1,9 +1,10 @@
 #include "UI/Inventory/Context/DropAreaWidget.h"
+#include "UI/Inventory/Context/EquipmentDragDropOperation.h"
 #include "Blueprint/DragDropOperation.h"
 #include "Components/SizeBox.h"
 #include "Components/InventoryComponent.h"
+#include "Components/EquipmentComponent.h"
 #include "Items/ItemObject.h"
-
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundBase.h"
 
@@ -50,6 +51,14 @@ bool UDropAreaWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDropE
 	// InventoryComponent -> DropItem(Target=InventoryComponent, Actor=Owner, ItemObject, GroundClamp=true)
 	AActor* OwnerActor = InventoryComponent->GetOwner();
 	InventoryComponent->DropItem(OwnerActor, ItemObject, true);
+
+	if (UEquipmentDragDropOperation* EquipOp = Cast<UEquipmentDragDropOperation>(InOperation))
+	{
+		if (IsValid(EquipOp->SourceEquipment))
+		{
+			EquipOp->SourceEquipment->UnequipSlot(EquipOp->SourceSlotId, false);
+		}
+	}
 
 	return true;
 }
